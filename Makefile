@@ -1,0 +1,17 @@
+TARGET = retrolaunch
+
+all: $(TARGET)
+
+OBJ = main.o \
+      sha1.o \
+      $(NULL)
+
+%.o: %.c
+	$(CC) $< -c -o $@
+
+clean:
+	rm -f *.o
+	rm -f $(TARGET)
+
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) $(DEFINES) -o $@ $(OBJ)
