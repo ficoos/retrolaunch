@@ -2,8 +2,10 @@ TARGET = retrolaunch
 
 all: $(TARGET)
 
-OBJ = main.o \
-      sha1.o \
+OBJ = main.o      \
+      sha1.o      \
+      parser.o    \
+      cd_detect.o \
       $(NULL)
 
 %.o: %.c

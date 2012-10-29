@@ -12,84 +12,16 @@
 #include <limits.h>
 
 #include "sha1.h"
-
-#define TRUE 1
-#define FALSE 0
+#include "parser.h"
+#include "cd_detect.h"
 
 #define SHA1_LEN 40
 #define HASH_LEN SHA1_LEN
 
-#define MAX_TOKEN_LEN 255
-
-static ssize_t get_token(int fd, char* token, size_t max_len) {
-    char* c = token;
-    int rv;
-    ssize_t len = 0;
-    int in_string = FALSE;
-
-    while (TRUE) {
-        rv = read(fd, c, 1);
-        if (rv == 0) {
-            return 0;
-        } else if (rv < 1) {
-            switch(errno) {
-                case EINTR:
-                case EAGAIN:
-                    continue;
-                default:
-                    return -errno;
-            }
-        }
-
-        switch (*c) {
-            case ' ':
-            case '\t':
-            case '\r':
-            case '\n':
-                if (c == token) {
-                    continue;
-                }
-
-                if (!in_string) {
-                    *c = '\0';
-                    return len;
-                }
-                break;
-            case '\"':
-                if (c == token) {
-                    in_string = TRUE;
-                    continue;
-                }
-
-                *c = '\0';
-                return len;
-        }
-
-        len++;
-        c++;
-        if (len == max_len) {
-            *c = '\0';
-            return len;
-        }
-    }
-}
-
-static int find_token(int fd, char* token) {
-    int tmp_len = strlen(token);
-    char* tmp_token = calloc(tmp_len, sizeof(char));
-    while (strncmp(tmp_token, token, tmp_len) != 0) {
-        if (get_token(fd, tmp_token, tmp_len) <= 0) {
-            return -1;
-        }
-    }
-
-    return 0;
-}
-
-static int find_hash(int fd, char* hash, char* game_name, size_t max_len) {
+static int find_hash(int fd, const char* hash, char* game_name, size_t max_len) {
     ssize_t rv;
     char token[MAX_TOKEN_LEN];
-    while (TRUE) {
+    while (1) {
         if (find_token(fd, "game") < 0) {
             return -1;
         }
@@ -116,7 +48,7 @@ static int find_hash(int fd, char* hash, char* game_name, size_t max_len) {
     }
 }
 
-static int find_rom_canonical_name(char* hash, char* game_name,
+static int find_rom_canonical_name(const char* hash, char* game_name,
                                    size_t max_len) {
     // TODO: Error handling
     int i;
@@ -144,7 +76,7 @@ static int find_rom_canonical_name(char* hash, char* game_name,
     return -1;
 }
 
-static int get_sha1(char* path, char* result) {
+static int get_sha1(const char* path, char* result) {
     int fd;
     int rv;
     int buff_len = 4096;
@@ -184,6 +116,7 @@ static int get_sha1(char* path, char* result) {
 struct RunInfo {
     char core[50];
     int multitap;
+    int dualanalog;
 };
 
 static int get_run_info(struct RunInfo* info, char* game_name) {
@@ -196,7 +129,7 @@ static int get_run_info(struct RunInfo* info, char* game_name) {
 
     memset(info, 0, sizeof(struct RunInfo));
 
-    while (TRUE) {
+    while (1) {
         if ((rv = get_token(fd, token, MAX_TOKEN_LEN)) < 0) {
             goto clean;
         }
@@ -208,17 +141,117 @@ static int get_run_info(struct RunInfo* info, char* game_name) {
             continue;
         }
 
+        printf("Matched rule '%s'\n", token);
+
         if ((rv = get_token(fd, token, MAX_TOKEN_LEN)) < 0) {
             goto clean;
         }
 
-        strncpy(info->core, token, 50);
         break;
+    }
+
+    strncpy(info->core, token, 50);
+    info->multitap = 0;
+    info->dualanalog = 0;
+
+    if ((rv = get_token(fd, token, MAX_TOKEN_LEN)) < 0) {
+        goto clean;
+    }
+
+    while (strcmp(token, ";") != 0) {
+        if (strcmp(token, "multitap")) {
+            info->multitap = 1;
+        } else if (strcmp(token, "dualanalog")) {
+            info->dualanalog = 1;
+        }
+
+        if ((rv = get_token(fd, token, MAX_TOKEN_LEN)) < 0) {
+            goto clean;
+        }
+
     }
     rv = 0;
 clean:
     close(fd);
     return rv;
+}
+
+char* SUFFIX_MATCH[] = {
+    ".nes", "nes",
+    ".gen", "smd",
+    ".smd", "smd",
+    ".bin", "smd",
+    ".sfc", "snes",
+    ".smc", "snes",
+    ".gg", "gg",
+    ".sms", "sms",
+    ".pce", "pce",
+    ".gba", "gba",
+    ".gb", "gb",
+    ".gbc", "gbc",
+    NULL
+};
+
+static int detect_rom_game(const char* path, char* game_name,
+                           size_t max_len) {
+    char hash[HASH_LEN + 1];
+    int rv;
+    char* suffix = strrchr(path, '.');
+    char** tmp_suffix;
+    if ((rv = get_sha1(path, hash)) < 0) {
+        fprintf(stderr, "Could not calculate hash: %s\n", strerror(-rv));
+    }
+
+    if (find_rom_canonical_name(hash, game_name, max_len) < 0) {
+        printf("Could not detect rom with hash `%s` guessing\n", hash);
+
+        for (tmp_suffix = SUFFIX_MATCH; *tmp_suffix != NULL;
+             tmp_suffix += 2) {
+            printf("%s, %s\n", *tmp_suffix, *(tmp_suffix + 1));
+            if (strcasecmp(suffix, *tmp_suffix) == 0) {
+                snprintf(game_name, max_len, "%s.(unknown)",
+                         *(tmp_suffix + 1));
+                return 0;
+            }
+        }
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+static int detect_game(const char* path, char* game_name, size_t max_len) {
+    if (strcasecmp(path + strlen(path) - 4, ".cue") == 0) {
+        printf("Starting CD game detection...\n");
+        return detect_cd_game(path, game_name, max_len);
+    } else {
+        printf("Starting rom game detection...\n");
+        return detect_rom_game(path, game_name, max_len);
+    }
+}
+
+static int run_retroarch(const char* path, const struct RunInfo* info) {
+    char core_path[PATH_MAX];
+    sprintf(core_path, "/usr/local/lib/libretro/libretro-%s.so", info->core);
+    char* retro_argv[] = {"retroarch",
+                          "-L", core_path,
+                          strdup(path), "-f", NULL, NULL, NULL, NULL};
+    int argi = 5;
+    if (info->multitap) {
+        retro_argv[argi] = "-4";
+        argi++;
+        printf("Game supports multitap\n");
+    }
+
+    if (info->dualanalog) {
+        retro_argv[argi] = "-A1";
+        retro_argv[argi] = "-A2";
+        argi += 2;
+        printf("Game supports the dualshock controller\n");
+    }
+
+    execvp(retro_argv[0], retro_argv);
+    return -errno;
 }
 
 int main(int argc, char* argv[]) {
@@ -228,19 +261,13 @@ int main(int argc, char* argv[]) {
 
     char game_name[MAX_TOKEN_LEN];
     char* path = argv[1];
-    char hash[HASH_LEN + 1];
     struct RunInfo info;
     int rv;
     int fd = -1;
 
-    if ((rv = get_sha1(path, hash)) < 0) {
-        fprintf(stderr, "Could not calculate hash: %s\n", strerror(-rv));
-    }
-
-    if (find_rom_canonical_name(hash, game_name, MAX_TOKEN_LEN) < 0) {
-        //TODO: Fallback to suffix hueristics
-        printf("Could not detect rom with hash `%s`\n", hash);
-        return -1;
+    if ((rv = detect_game(path, game_name, MAX_TOKEN_LEN)) < 0) {
+        printf("Could not detect game: %s\n", strerror(-rv));
+        return -rv;
     }
 
     printf("Game is `%s`\n", game_name);
@@ -249,14 +276,10 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    char core_path[PATH_MAX];
-    sprintf(core_path, "/usr/local/lib/libretro/libretro-%s.so", info.core);
+    printf("Usinge libretro core '%s'\n", info.core);
+    printf("Launching '%s'\n", path);
 
-    char* retro_argv[] = {"retroarch",
-                          "-L", core_path,
-                          path, NULL};
-    execvp(retro_argv[0], retro_argv);
-    fprintf(stderr, "Could not launch retroarch: %s", strerror(errno));
-
-    return errno;
+    rv = run_retroarch(path, &info);
+    fprintf(stderr, "Could not launch retroarch: %s", strerror(-rv));
+    return -rv;
 }
