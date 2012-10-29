@@ -209,7 +209,7 @@ static int detect_rom_game(const char* path, char* game_name,
              tmp_suffix += 2) {
             printf("%s, %s\n", *tmp_suffix, *(tmp_suffix + 1));
             if (strcasecmp(suffix, *tmp_suffix) == 0) {
-                snprintf(game_name, max_len, "%s.(unknown)",
+                snprintf(game_name, max_len, "%s.<unknown>",
                          *(tmp_suffix + 1));
                 return 0;
             }
