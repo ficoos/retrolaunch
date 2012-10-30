@@ -222,7 +222,8 @@ static int detect_rom_game(const char* path, char* game_name,
 }
 
 static int detect_game(const char* path, char* game_name, size_t max_len) {
-    if (strcasecmp(path + strlen(path) - 4, ".cue") == 0) {
+    if ((strcasecmp(path + strlen(path) - 4, ".cue") == 0) ||
+        (strcasecmp(path + strlen(path) - 4, ".m3u") == 0)) {
         LOG_INFO("Starting CD game detection...");
         return detect_cd_game(path, game_name, max_len);
     } else {

@@ -41,7 +41,7 @@ static int find_first_data_track(const char* cue_path, off_t* offset,
     if (fd < 0) {
         LOG_WARN("Could not open CUE file '%s': %s", cue_path,
                  strerror(errno));
-        rv -errno;
+        rv = -errno;
         goto free_path_copy;
     }
 
@@ -220,11 +220,71 @@ clean:
     return rv;
 }
 
-int detect_cd_game(const char* cue_path, char* game_name, size_t max_len) {
+int find_fist_cue(const char* m3u_path, char* cue_path, size_t max_len) {
+    char c;
+    int skip = 0;
+    int midstream = 0;
+    char tmp_path[PATH_MAX];
+
+    int fd = open(m3u_path, O_RDONLY);
+    if (fd < 0) {
+        LOG_WARN("Could not open m3u '%s': %s", m3u_path, strerror(errno));
+        return -errno;
+    }
+
+    strncpy(tmp_path, m3u_path, PATH_MAX);
+    strcpy(cue_path, dirname(tmp_path));
+    cue_path += strlen(cue_path);
+    cue_path[0] = '/';
+    cue_path++;
+
+    while ((read(fd, &c, 1) > 0)) {
+        switch (c) {
+            case '#':
+                if (!midstream) {
+                    skip = 1;
+                }
+                break;
+            case '\n':
+                if (skip) {
+                    skip = 0;
+                } else if(midstream) {
+                    cue_path[0] = '\0';
+                    return 0;
+                }
+                break;
+            case ' ':
+                if (!midstream) {
+                    break;
+                }
+            default:
+                if (!skip) {
+                    midstream = 1;
+                    cue_path[0] = c;
+                    cue_path++;
+                }
+        }
+    }
+
+    return -EINVAL;
+}
+
+int detect_cd_game(const char* target_path, char* game_name, size_t max_len) {
+    char cue_path[PATH_MAX];
     char track_path[PATH_MAX];
     off_t offset;
     char* system_name;
     int rv;
+    if (strcasecmp(target_path + strlen(target_path) - 4, ".m3u") == 0) {
+        rv = find_fist_cue(target_path, cue_path, PATH_MAX);
+        if (rv < 0) {
+            LOG_WARN("Could not parse m3u: %s", strerror(-rv));
+            return rv;
+        }
+
+    } else {
+        strncpy(cue_path, target_path, max_len);
+    }
 
     rv = find_first_data_track(cue_path, &offset, track_path, PATH_MAX);
     if (rv < 0) {
