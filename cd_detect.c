@@ -132,6 +132,15 @@ static int detect_ps1_game(const char* track_path, off_t offset,
         return -errno;
     }
 
+    if (pread(fd, buff, 10, 0x9340) > 0) {
+        buff[10] = '\0';
+        buff[4] = '-';
+        LOG_DEBUG("Found disk label '%s'", buff);
+        rv = find_ps1_canonical_name(buff, game_name, max_len);
+        if (rv == 0) {
+            goto clean;
+        }
+    }
     rv = 1;
     c = pattern;
     while (1) {

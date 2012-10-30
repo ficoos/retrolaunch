@@ -161,9 +161,9 @@ static int get_run_info(struct RunInfo* info, char* game_name) {
     }
 
     while (strcmp(token, ";") != 0) {
-        if (strcmp(token, "multitap")) {
+        if (strcmp(token, "multitap") == 0) {
             info->multitap = 1;
-        } else if (strcmp(token, "dualanalog")) {
+        } else if (strcmp(token, "dualanalog") == 0) {
             info->dualanalog = 1;
         }
 
@@ -234,10 +234,9 @@ static int detect_game(const char* path, char* game_name, size_t max_len) {
 static int run_retroarch(const char* path, const struct RunInfo* info) {
     char core_path[PATH_MAX];
     sprintf(core_path, "/usr/local/lib/libretro/libretro-%s.so", info->core);
-    char* retro_argv[] = {"retroarch",
-                          "-L", core_path,
-                          strdup(path), NULL, NULL, NULL, NULL, NULL};
-    int argi = 5;
+    char* retro_argv[30] = {"retroarch",
+                          "-L", core_path};
+    int argi = 3;
     if (info->multitap) {
         retro_argv[argi] = "-4";
         argi++;
@@ -245,12 +244,20 @@ static int run_retroarch(const char* path, const struct RunInfo* info) {
     }
 
     if (info->dualanalog) {
-        retro_argv[argi] = "-A1";
-        retro_argv[argi] = "-A2";
-        argi += 2;
+        retro_argv[argi] = "-A";
+        argi ++;
+        retro_argv[argi] = "1";
+        argi ++;
+        retro_argv[argi] = "-A";
+        argi ++;
+        retro_argv[argi] = "2";
+        argi ++;
         LOG_INFO("Game supports the dualshock controller");
     }
 
+    retro_argv[argi] = strdup(path);
+    argi ++;
+    retro_argv[argi] = NULL;
     execvp(retro_argv[0], retro_argv);
     return -errno;
 }
