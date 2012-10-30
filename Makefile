@@ -1,5 +1,7 @@
 TARGET = retrolaunch
 
+CFLAGS=-std=c99 -Wall -pedantic -g
+
 all: $(TARGET)
 
 OBJ = main.o      \

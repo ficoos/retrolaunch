@@ -15,6 +15,8 @@
 #include "parser.h"
 #include "cd_detect.h"
 
+#include "log.h"
+
 #define SHA1_LEN 40
 #define HASH_LEN SHA1_LEN
 
@@ -141,7 +143,7 @@ static int get_run_info(struct RunInfo* info, char* game_name) {
             continue;
         }
 
-        printf("Matched rule '%s'\n", token);
+        LOG_DEBUG("Matched rule '%s'", token);
 
         if ((rv = get_token(fd, token, MAX_TOKEN_LEN)) < 0) {
             goto clean;
@@ -199,15 +201,14 @@ static int detect_rom_game(const char* path, char* game_name,
     char* suffix = strrchr(path, '.');
     char** tmp_suffix;
     if ((rv = get_sha1(path, hash)) < 0) {
-        fprintf(stderr, "Could not calculate hash: %s\n", strerror(-rv));
+        LOG_WARN("Could not calculate hash: %s", strerror(-rv));
     }
 
     if (find_rom_canonical_name(hash, game_name, max_len) < 0) {
-        printf("Could not detect rom with hash `%s` guessing\n", hash);
+        LOG_DEBUG("Could not detect rom with hash `%s` guessing", hash);
 
         for (tmp_suffix = SUFFIX_MATCH; *tmp_suffix != NULL;
              tmp_suffix += 2) {
-            printf("%s, %s\n", *tmp_suffix, *(tmp_suffix + 1));
             if (strcasecmp(suffix, *tmp_suffix) == 0) {
                 snprintf(game_name, max_len, "%s.<unknown>",
                          *(tmp_suffix + 1));
@@ -222,10 +223,10 @@ static int detect_rom_game(const char* path, char* game_name,
 
 static int detect_game(const char* path, char* game_name, size_t max_len) {
     if (strcasecmp(path + strlen(path) - 4, ".cue") == 0) {
-        printf("Starting CD game detection...\n");
+        LOG_INFO("Starting CD game detection...");
         return detect_cd_game(path, game_name, max_len);
     } else {
-        printf("Starting rom game detection...\n");
+        LOG_INFO("Starting rom game detection...");
         return detect_rom_game(path, game_name, max_len);
     }
 }
@@ -235,19 +236,19 @@ static int run_retroarch(const char* path, const struct RunInfo* info) {
     sprintf(core_path, "/usr/local/lib/libretro/libretro-%s.so", info->core);
     char* retro_argv[] = {"retroarch",
                           "-L", core_path,
-                          strdup(path), "-f", NULL, NULL, NULL, NULL};
+                          strdup(path), NULL, NULL, NULL, NULL, NULL};
     int argi = 5;
     if (info->multitap) {
         retro_argv[argi] = "-4";
         argi++;
-        printf("Game supports multitap\n");
+        LOG_INFO("Game supports multitap");
     }
 
     if (info->dualanalog) {
         retro_argv[argi] = "-A1";
         retro_argv[argi] = "-A2";
         argi += 2;
-        printf("Game supports the dualshock controller\n");
+        LOG_INFO("Game supports the dualshock controller");
     }
 
     execvp(retro_argv[0], retro_argv);
@@ -266,20 +267,20 @@ int main(int argc, char* argv[]) {
     int fd = -1;
 
     if ((rv = detect_game(path, game_name, MAX_TOKEN_LEN)) < 0) {
-        printf("Could not detect game: %s\n", strerror(-rv));
+        LOG_WARN("Could not detect game: %s", strerror(-rv));
         return -rv;
     }
 
-    printf("Game is `%s`\n", game_name);
+    LOG_INFO("Game is `%s`", game_name);
     if ((rv = get_run_info(&info, game_name)) < 0) {
-        fprintf(stderr, "Could not find sutable core: %s\n", strerror(-rv));
+        LOG_WARN("Could not find sutable core: %s", strerror(-rv));
         return -1;
     }
 
-    printf("Usinge libretro core '%s'\n", info.core);
-    printf("Launching '%s'\n", path);
+    LOG_DEBUG("Usinge libretro core '%s'", info.core);
+    LOG_INFO("Launching '%s'", path);
 
     rv = run_retroarch(path, &info);
-    fprintf(stderr, "Could not launch retroarch: %s", strerror(-rv));
+    LOG_WARN("Could not launch retroarch: %s", strerror(-rv));
     return -rv;
 }

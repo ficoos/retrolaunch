@@ -10,6 +10,8 @@
 #include <libgen.h>
 #include <stdlib.h>
 
+#include "log.h"
+
 #define MAGIC_LEN 16
 
 struct MagicEntry {
@@ -37,12 +39,13 @@ static int find_first_data_track(const char* cue_path, off_t* offset,
 
     fd = open(cue_path, O_RDONLY);
     if (fd < 0) {
-        printf("Could not open CUE file: %s\n", strerror(errno));
+        LOG_WARN("Could not open CUE file '%s': %s", cue_path,
+                 strerror(errno));
         rv -errno;
         goto free_path_copy;
     }
 
-    printf("Parsing CUE file...\n");
+    LOG_DEBUG("Parsing CUE file '%s'...", cue_path);
 
     while (get_token(fd, tmp_token, MAX_TOKEN_LEN) > 0) {
         if (strcmp(tmp_token, "FILE") == 0) {
@@ -61,12 +64,12 @@ static int find_first_data_track(const char* cue_path, off_t* offset,
             get_token(fd, tmp_token, MAX_TOKEN_LEN);
             get_token(fd, tmp_token, MAX_TOKEN_LEN);
             if (sscanf(tmp_token, "%02d:%02d:%02d", &m, &s, &f) < 3) {
-                printf("Error parsing time stamp '%s'\n", tmp_token);
+                LOG_WARN("Error parsing time stamp '%s'", tmp_token);
                 return -errno;
             }
             *offset = ((m * 60) * (s * 75) * f) * 25;
 
-            printf("Found 1st data track on file '%s+%d'\n",
+            LOG_DEBUG("Found 1st data track on file '%s+%d'",
                     track_path, *offset);
 
             rv = 0;
@@ -83,33 +86,116 @@ free_path_copy:
     return rv;
 }
 
-static int detect_system(const char* cue_path, char** system_name) {
-    char track_path[PATH_MAX];
-    off_t offset;
+static int find_ps1_canonical_name(const char* game_id, char* game_name,
+                                   size_t max_len) {
+    int fd;
+    char tmp_token[MAX_TOKEN_LEN];
+    int rv = 0;
+    fd = open("cddb/ps1.idlst", O_RDONLY);
+    if (fd < 0) {
+        LOG_WARN("Could not open id list: %s", strerror(errno));
+        return -errno;
+    }
+
+    while (get_token(fd, tmp_token, MAX_TOKEN_LEN) > 0) {
+        if(strcasecmp(tmp_token, game_id) != 0) {
+            get_token(fd, tmp_token, max_len);
+            continue;
+        }
+
+        if ((rv = get_token(fd, game_name, max_len)) < 0) {
+            goto clean;
+        }
+
+        rv = 0;
+        goto clean;
+    }
+
+    rv = -ENOENT;
+clean:
+    close(fd);
+    return rv;
+}
+
+static int detect_ps1_game(const char* track_path, off_t offset,
+                          char* game_name, size_t max_len) {
+    int rv;
+    char buff[4096];
+    char* pattern = "cdrom:";
+    char* c;
+    char* id_start;
+    int i;
+
+    int fd = open(track_path, O_RDONLY);
+    if (fd < 0) {
+        LOG_DEBUG("Could not open data track: %s", strerror(errno));
+        return -errno;
+    }
+
+    rv = 1;
+    c = pattern;
+    while (1) {
+        rv = read(fd, buff, 4096);
+        if (rv < 0) {
+            rv = -errno;
+            goto clean;
+        }
+
+        for(i = 0; i < 4096; i++) {
+            if (*c == buff[i]) {
+                c++;
+            } else {
+                c = pattern;
+                continue;
+            }
+
+            if (*c == '\0') {
+                id_start = &buff[i] + 1;
+                *strchr(id_start, ';') = '\0';
+                c = strrchr(id_start, '\\') + 1;
+                if (c != NULL) {
+                    id_start = c;
+                }
+                id_start[4] = '-';
+                id_start[8] = id_start[9];
+                id_start[9] = id_start[10];
+                id_start[10] = '\0';
+                LOG_DEBUG("Found ps1 id %s", id_start);
+                rv = find_ps1_canonical_name(id_start, game_name, max_len);
+                goto clean;
+            }
+        }
+    }
+    rv = -EINVAL;
+clean:
+    close(fd);
+    return rv;
+}
+
+static int detect_system(const char* track_path, off_t offset,
+        char** system_name) {
     int rv;
     char magic[MAGIC_LEN];
     int fd;
     struct MagicEntry entry;
     int i;
 
-    rv = find_first_data_track(cue_path, &offset, track_path, PATH_MAX);
-    if (rv < 0) {
-        printf("Could not find valid data track: %s\n", strerror(-rv));
-        return rv;
-    }
-
-    printf("Reading 1st data track...\n");
     fd = open(track_path, O_RDONLY);
     if (fd < 0) {
+        LOG_WARN("Could not open data track of file '%s': %s",
+                 track_path, strerror(errno));
         rv = -errno;
         goto clean;
     }
 
     if (pread(fd, magic, MAGIC_LEN, offset) < MAGIC_LEN) {
+        LOG_WARN("Could not read data from file '%s' at offset %d: %s",
+                track_path, offset, strerror(errno));
         rv = -errno;
         goto clean;
     }
 
+    LOG_DEBUG("Comparing with known magic numbers...");
     for (i = 0; MAGIC_NUMBERS[i].system_name != NULL; i++) {
         if (memcmp(MAGIC_NUMBERS[i].magic, magic, MAGIC_LEN) == 0) {
             *system_name = MAGIC_NUMBERS[i].system_name;
@@ -118,7 +204,7 @@ static int detect_system(const char* cue_path, char** system_name) {
         }
     }
 
-    printf("Could not find compatible system\n");
+    LOG_WARN("Could not find compatible system");
     rv = -EINVAL;
 clean:
     close(fd);
@@ -126,14 +212,35 @@ clean:
 }
 
 int detect_cd_game(const char* cue_path, char* game_name, size_t max_len) {
+    char track_path[PATH_MAX];
+    off_t offset;
     char* system_name;
     int rv;
 
-    if ((rv = detect_system(cue_path, &system_name)) < 0) {
+    rv = find_first_data_track(cue_path, &offset, track_path, PATH_MAX);
+    if (rv < 0) {
+        LOG_WARN("Could not find valid data track: %s", strerror(-rv));
         return rv;
     }
 
-    snprintf(game_name, max_len, "%s.<unknown>", system_name);
+    LOG_DEBUG("Reading 1st data track...");
+
+    if ((rv = detect_system(track_path, offset, &system_name)) < 0) {
+        return rv;
+    }
+
+
+    LOG_DEBUG("Detected %s media", system_name);
+
+    snprintf(game_name, max_len, "%s.", system_name);
+    game_name += strlen(system_name) + 1;
+    max_len -= strlen(system_name) + 1;
+    if (strcmp(system_name, "ps1") == 0) {
+        if (detect_ps1_game(track_path, offset, game_name, max_len) == 0) {
+            return 0;
+        }
+    }
+
+    snprintf(game_name, max_len, "<unknown>", system_name);
     return 0;
 }
-
