@@ -29,7 +29,7 @@ static struct MagicEntry MAGIC_NUMBERS[] = {
 static int find_first_data_track(const char* cue_path, off_t* offset,
                                  char* track_path, size_t max_len) {
     int rv;
-    int fd = open(cue_path, O_RDONLY);
+    int fd = -1;
     char tmp_token[MAX_TOKEN_LEN];
     int m, s, f;
     char* cue_path_copy;
@@ -141,7 +141,6 @@ static int detect_ps1_game(const char* track_path, off_t offset,
             goto clean;
         }
     }
-    rv = 1;
     c = pattern;
     while (1) {
         rv = read(fd, buff, 4096);

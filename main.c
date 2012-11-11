@@ -274,6 +274,7 @@ int main(int argc, char* argv[]) {
     int rv;
     int fd = -1;
 
+    LOG_INFO("Analyzing '%s'", path);
     if ((rv = detect_game(path, game_name, MAX_TOKEN_LEN)) < 0) {
         LOG_WARN("Could not detect game: %s", strerror(-rv));
         return -rv;
