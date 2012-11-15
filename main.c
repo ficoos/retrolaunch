@@ -192,6 +192,7 @@ char* SUFFIX_MATCH[] = {
     ".gb", "gb",
     ".gbc", "gbc",
     ".nds", "nds",
+    ".wsc", "wswan",
     NULL
 };
 
