@@ -234,7 +234,7 @@ static int detect_game(const char* path, char* game_name, size_t max_len) {
 
 static int run_retroarch(const char* path, const struct RunInfo* info) {
     char core_path[PATH_MAX];
-    sprintf(core_path, "/usr/local/lib/libretro/libretro-%s.so", info->core);
+    sprintf(core_path, "./cores/libretro-%s.so", info->core);
     char* retro_argv[30] = {"retroarch",
                           "-L", core_path};
     int argi = 3;
