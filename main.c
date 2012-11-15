@@ -191,6 +191,7 @@ char* SUFFIX_MATCH[] = {
     ".gba", "gba",
     ".gb", "gb",
     ".gbc", "gbc",
+    ".nds", "nds",
     NULL
 };
 
